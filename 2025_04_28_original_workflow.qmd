@@ -1,0 +1,434 @@
+---
+title: "2025_04_28_Seurat_workflow"
+format: html
+---
+
+# Setup
+
+## Libraries
+
+```{r}
+library(Seurat)
+# library(dittoSeq)
+library(tidyverse)
+library(ggplot2)
+library(spacexr)
+library(qs)
+set.seed(123)
+```
+
+## Directories
+
+```{r}
+data.dir <- "data/"
+
+result.dir <- "2025_04_28_results/"
+
+dir.create(result.dir, recursive = T)
+```
+
+# Read in data
+
+```{r}
+temp <- LoadXenium(data.dir = paste0(data.dir, "output-XETG00230__0037550__MRV1__20250210__225855"),
+                   fov = "fov")
+```
+
+# Analysis
+
+## Plot Features and nCount
+
+```{r}
+VlnPlot(temp, features = "nFeature_Xenium", ncol = 2, pt.size = 0)
+VlnPlot(temp, features = "nCount_Xenium", ncol = 2, pt.size = 0)
+```
+
+Based on the previous charts and experience in previous notebooks using filterGiotto, I believe my computer can run analysis on this sample if we set the nCount minimum to 100.
+
+```{r}
+temp <- subset(temp, subset = nCount_Xenium > 100)
+```
+
+This is the step that needs a lot of memory and possibly time.
+Here we perform the SCTrasform, PCA, UMAP, and FindNeighbors/FinClusters
+
+```{r}
+options(future.globals.maxSize= 1100*1024^2) # added to fix error of 500MiB limiton future.globals.maxSize. Upped to 1100
+
+
+temp <- SCTransform(temp, assay = "Xenium")
+temp <- RunPCA(temp, npcs = 30, features = rownames(temp))
+temp <- RunUMAP(temp, dims = 1:30)
+temp <- FindNeighbors(temp, reduction = "pca", dims = 1:30)
+temp <- FindClusters(temp, resolution = 0.3)
+```
+
+Take a look at our UMAP
+
+```{r}
+DimPlot(temp)
+```
+
+Generate a plot with each cluster given an individual color
+
+```{r}
+ImageDimPlot(temp, cols = "polychrome", size = 0.75)
+```
+
+There are some gaps (filtered out with nCount > 100) but I like the clustering I see.
+
+### SAVE PRE ANNO
+
+Saving temp object in case I need to test other methods on the temp object post SCTransform.
+
+```{r}
+# saveRDS(temp, file = paste0(result.dir, "RCTD/MRV1_preRCTD.rds"))
+# temp <- read_rds(paste0(result.dir, "RCTD/MRV1_preRCTD.rds"))
+```
+
+
+
+Xenium object does not have RNA assay slot.... can't perform FindTransferAnchors.
+
+There may be a way to extract the counts and create a Seurat or SingleCellExperiment.
+
+```{r}
+Assays(temp)
+Assays(HCAT.ref)
+```
+
+# RCTD using Tzu reference
+
+Seurat v5 also includes support for the Robust Cell Type Decomposition (https://www.nature.com/articles/s41587-021-00830-w) , a computational approach to deconvolve spot-level data from spatial datasets, when provided with an scRNA-seq reference. RCTD has been shown to accurately annotate spatial data from a variety of technologies, including SLIDE-seq, Visium, and the 10x Xenium in-situ spatial platform.
+
+To run RCTD, we need our "query" dataset from the Xenium object and a "reference" dataset from an outside, annotated single cell experiment.
+
+## Build query object
+
+This chunk is from adapted the vignette. Changed for my dataset (`temp` instead of `xenium.object`)
+
+```{r}
+library(spacexr)
+
+HCAT.query.counts <- GetAssayData(temp, assay = "Xenium", layer = "counts") #n, Cells(temp[["crop"]])] no crop used here
+HCAT.coords <- GetTissueCoordinates(temp, #[["crop"]], 
+                               which = "centroids")
+rownames(HCAT.coords) <- HCAT.coords$cell
+HCAT.coords$cell <- NULL
+HCAT.query <- SpatialRNA(HCAT.coords, HCAT.query.counts, colSums(HCAT.query.counts))
+```
+
+## Build reference object
+
+```{r}
+HCAT.ref <- qread("data/2023_08_29_HCAT_combined.qs", nthreads = 10)
+```
+
+RCTD requires at least 25 reference cells per cluster, so we need to check our cluster counts in our reference object.
+
+In this previously constructed dataset, Tzu Phang combined four different tonsil scRNA datasets and created a new column in the metadata called `annotation_20220215` that contains all the cluster names.
+
+```{r}
+levels(as.factor(HCAT.ref@meta.data$annotation_20220215))
+
+HCAT.ref@meta.data |> 
+  dplyr::count(annotation_20220215) |> 
+  arrange(n)
+```
+
+We need to remove `aDC2` and `DC3.` I will filter them out and then continue to build the reference object.
+
+```{r}
+# Filter out clusters names with too few cells
+HCAT.ref <- subset(HCAT.ref, annotation_20220215 != "aDC2" & annotation_20220215 != "DC3")
+```
+
+The reference object contains a count matrix, cluster names (annotations), and the total nUMI counts per cell (for scaling/normaliztion)
+
+```{r}
+# HCAT.ref <- UpdateSeuratObject(HCAT.ref) # Is this necessary?
+
+# Extract counts matrix from the reference object
+HCAT.counts <- GetAssayData(HCAT.ref, assay = "RNA", layer = "counts")
+# Extract the annotated cluster names.
+HCAT.cluster <- as.factor(HCAT.ref@meta.data$annotation_20220215)
+# Extract the cell barcodes from the reference object and assign to HCAT.cluster
+names(HCAT.cluster) <- colnames(HCAT.ref)
+# Extract nUMI counts
+HCAT.nUMI <- HCAT.ref$nCount_RNA
+# Extract the cell barcodes from the reference object and assign to HCAT.nUMI
+names(HCAT.nUMI) <- colnames(HCAT.ref)
+
+HCAT.nUMI <- colSums(HCAT.counts) # Is this necessary or redundant?
+# levels(HCAT.cluster) <- gsub("/", "-", levels(HCAT.cluster)) Commented out because our factors have no "/"s in them
+HCAT.reference <- Reference(HCAT.counts, HCAT.cluster, HCAT.nUMI)
+```
+
+## Run RCTD
+
+```{r}
+# run RCTD with many cores
+HCAT.RCTD <- create.RCTD(HCAT.query, HCAT.reference, max_cores = 16)
+
+HCAT.RCTD <- run.RCTD(HCAT.RCTD, doublet_mode = "doublet")
+```
+
+## Create annotated results
+
+```{r}
+annotations.df <- HCAT.RCTD@results$results_df
+annotations <- annotations.df$first_type
+names(annotations) <- rownames(annotations.df)
+temp$predicted.celltype <- annotations
+keep.cells <- Cells(temp)[!is.na(temp$predicted.celltype)]
+temp <- subset(temp, cells = keep.cells)
+```
+
+# SAVE TZU RCTD
+
+```{r}
+# saveRDS(temp, file = paste0(result.dir, "RCTD/MRV1_TzuRef.rds"))
+# mrv1.tzuref <- read_rds(paste0(result.dir, "RCTD/MRV1_TzuRef.rds"))
+```
+
+## Plotting
+
+### Build Niche Assay
+
+```{r}
+temp <- BuildNicheAssay(object = temp, group.by = "predicted.celltype", fov = "fov",
+    niches.k = 10, neighbors.k = 30)
+```
+
+
+### Celltype plot
+
+```{r}
+celltype.plot <- ImageDimPlot(temp, group.by = "predicted.celltype", size = 0.5, cols = "polychrome",
+    dark.background = F) + ggtitle("Cell type")
+
+celltype.plot
+
+# ggsave(filename = paste0(result.dir, "Celltype_plot.png"),
+#        plot = celltype.plot,
+#        width = 11,
+#        height = 8,
+#        units = "in",
+#        dpi = 300)
+```
+
+### Niches plot
+
+```{r}
+niche.plot <- ImageDimPlot(temp, group.by = "niches", size = 1, dark.background = F) + ggtitle("Niches") 
+  # + scale_fill_manual(values = c("#442288", "#6CA2EA", "#B5D33D", "#FED23F", "#EB7D5B"))
+
+niche.plot
+
+# ggsave(filename = paste0(result.dir, "Niche_plot.png"),
+#        plot = niche.plot,
+#        width = 11,
+#        height = 8,
+#        units = "in",
+#        dpi = 300)
+```
+
+### Cellular niches table
+
+```{r}
+table(temp$predicted.celltype, temp$niches)
+```
+
+
+# RCTD using HCA Tonsil data package
+
+## Load HCA Tonsil
+
+The group that created the HCA tonsil data released it in a package on Bioconductor. I will load it in and try to anchor our tonsil sample to see how it compares to the one Tzu created.
+
+https://bioconductor.org/packages/release/data/experiment/vignettes/HCATonsilData/inst/doc/HCATonsilData.html#44_Spatial_transcriptomics
+
+
+```{r}
+# sce <- HCATonsilData(assayType = "RNA", cellType = "All")
+```
+
+That codechunk from the vignette did not work. I went to the website repo for the data and downloaded it manually.
+
+https://zenodo.org/records/8373756
+
+"TonsilAtlasSeuratRNA.tar.gz"
+
+```{r}
+sce <- read_rds(file = "data/HCA_scRNAseq/20230911_tonsil_atlas_rna_seurat_obj.rds")
+table(sce$assay)
+```
+## Reload Xenium data fresh
+
+```{r}
+# temp <- read_rds(paste0(result.dir, "RCTD/MRV1_preRCTD.rds"))
+```
+
+## Build query object
+
+```{r}
+HCAT.query.counts <- GetAssayData(temp, assay = "Xenium", slot = "counts") #n, Cells(temp[["crop"]])] no crop used here
+HCAT.coords <- GetTissueCoordinates(temp, #[["crop"]], 
+                               which = "centroids")
+rownames(HCAT.coords) <- HCAT.coords$cell
+HCAT.coords$cell <- NULL
+HCAT.query <- SpatialRNA(HCAT.coords, HCAT.query.counts, colSums(HCAT.query.counts))
+rm(HCAT.coords, HCAT.query.counts)
+```
+
+## Build reference object
+
+First I need to explore the sce object to find the cluster names.
+
+```{r}
+levels(sce@meta.data$annotation_level_1)
+length(levels(as.factor(sce@meta.data$annotation_20220215)))
+length(levels(as.factor(sce@meta.data$annotation_20220619)))
+length(levels(as.factor(sce@meta.data$annotation_20230508)))
+```
+I'll use the most recent annotation, 20230508.
+
+Need to check cell cluster numbers and remove any that are < 25.
+
+```{r}
+sce@meta.data |> 
+  dplyr::count(annotation_20230508) |> 
+  arrange(n) 
+```
+
+Removing clusters that have less than 25 cells.
+
+```{r}
+# Filter out clusters names with too few cells
+# mem.maxVSize(vsize = 60000)
+sce <- subset(sce, annotation_20230508 != "Outer surface" & annotation_20230508 != "preT")
+```
+
+The reference object contains a count matrix, cluster names (annotations), and the total nUMI counts per cell (for scaling/normaliztaion)
+
+```{r}
+# Extract counts matrix from the reference object
+sce.counts <- GetAssayData(sce, assay = "RNA", slot = "counts")
+# Extract the annotated cluster names.
+sce.cluster <- as.factor(sce@meta.data$annotation_20230508)
+# Extract the cell barcodes from the reference object and assign to sce.cluster
+names(sce.cluster) <- colnames(sce)
+# Extract nUMI counts
+sce.nUMI <- sce$nCount_RNA
+# Extract the cell barcodes from the reference object and assign to sce.nUMI
+names(sce.nUMI) <- colnames(sce)
+
+sce.nUMI <- colSums(sce.counts) # Is this necessary or redundant?
+levels(sce.cluster) <- gsub("/", "-", levels(sce.cluster)) # Removes "/s"
+sce.reference <- Reference(sce.counts, sce.cluster, sce.nUMI)
+rm(sce.counts, sce.cluster, sce.nUMI)
+```
+
+We will want to use this reference object for other samples, so I will save a copy.
+
+```{r}
+saveRDS(object = sce.reference, file = paste0(result.dir, "sce.reference.object.rds"))
+sce.reference <- readRDS(file = "2025_04_28_results/sce.reference.object.rds")
+```
+
+
+```{r}
+# run RCTD with many cores
+sce.RCTD <- create.RCTD(HCAT.query, sce.reference, max_cores = 16)
+saveRDS(c(sce.RCTD, HCAT.query, sce.reference), file = paste0(result.dir, "HCAT.RCTD.rds"))
+
+# rm(HCAT.query, sce, sce.reference)
+sce.RCTD <- run.RCTD(sce.RCTD, doublet_mode = "doublet")
+```
+
+## Create annotated results
+
+```{r}
+annotations.df <- sce.RCTD@results$results_df
+annotations <- annotations.df$first_type
+names(annotations) <- rownames(annotations.df)
+temp$predicted.celltype <- annotations
+keep.cells <- Cells(temp)[!is.na(temp$predicted.celltype)]
+temp <- subset(temp, cells = keep.cells)
+```
+
+# SAVE HCAT RCTD
+
+```{r}
+saveRDS(temp, file = paste0(result.dir, "RCTD/MRV1_HCAT.rds"))
+# temp <- read_rds(paste0(result.dir, "RCTD/MRV1_HCAT.rds"))
+```
+
+## Plotting
+
+### Build Niche Assay
+
+```{r}
+temp <- BuildNicheAssay(object = temp, 
+                        fov = "fov",
+                        group.by = "predicted.celltype",
+                        neighbors.k = 30,
+                        niches.k = 10)
+```
+
+
+### Celltype plot
+
+```{r}
+celltype.plot <- ImageDimPlot(temp, 
+                              group.by = "predicted.celltype", 
+                              size = 0.5, 
+                              cols = "polychrome",
+                              dark.background = F) + 
+  ggtitle("Cell types") 
+  # theme(legend.position = "none")
+
+celltype.plot
+
+# ggsave(filename = paste0(result.dir, "Celltype_plot_HCAT.png"),
+#        plot = celltype.plot,
+#        width = 11,
+#        height = 8,
+#        units = "in",
+#        dpi = 300)
+```
+
+### Niches plot
+
+```{r}
+top.10.groups <- temp@meta.data |> 
+  dplyr::count(predicted.celltype) |> 
+  arrange(desc(n)) |> 
+  write.csv(file = paste0(result.dir, "HCAT_annotated_table.csv"))
+
+top.10.groups <- top.10.groups[1:20,1]
+top.10.groups <- as.vector(top.10.groups)
+
+subset.temp <- subset(temp, subset = predicted.celltype %in% top.10.groups)
+```
+
+
+```{r}
+niche.plot <- ImageDimPlot(temp, group.by = "niches", size = 1, dark.background = F) + ggtitle("Niches") 
+  # + scale_fill_manual(values = c("#442288", "#6CA2EA", "#B5D33D", "#FED23F", "#EB7D5B"))
+
+niche.plot
+
+# ggsave(filename = paste0(result.dir, "Niche_plot_HCAT.png"),
+#        plot = niche.plot,
+#        width = 11,
+#        height = 8,
+#        units = "in",
+#        dpi = 300)
+```
+
+### Cellular niches table
+
+```{r}
+table(temp$predicted.celltype, temp$niches)
+```

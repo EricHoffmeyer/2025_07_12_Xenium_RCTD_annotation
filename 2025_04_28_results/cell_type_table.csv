@@ -1,0 +1,120 @@
+"","annotation_20230508","n"
+"1","NBC",75058
+"2","csMBC",41492
+"3","Naive",31060
+"4","ncsMBC",25479
+"5","DZ_LZ transition",22934
+"6","NBC early activation",21411
+"7","Tfh-LZ-GC",15564
+"8","CM PreTfh",13179
+"9","GC-commited NBC",12267
+"10","GC-Tfh-SAP",11970
+"11","CM Pre-non-Tfh",11455
+"12","DZ late Sphase",10128
+"13","csMBC FCRL4/5+",9744
+"14","DZ non proliferative",9267
+"15","Naive CD8 T",8681
+"16","DZ early Sphase",8040
+"17","DZ late G2Mphase",6851
+"18","LZ",5987
+"19","DZ early G2Mphase",5972
+"20","ncsMBC FCRL4/5+",5063
+"21","Precursor MBCs",4855
+"22","Early GC-commited NBC",4727
+"23","Eff-Tregs",4337
+"24","RM CD8 activated T",4316
+"25","Tfh-Mem",4303
+"26","LZ_DZ transition",4240
+"27","NBC IFN-activated",4211
+"28","preGC",3942
+"29","Reactivated proliferative MBCs",3485
+"30","Tfr",3414
+"31","DZ cell cycle exit",3311
+"32","MBC FCRL5+",3170
+"33","LZ_DZ reentry commitment",3110
+"34","T-Trans-Mem",3054
+"35","LZ proliferative",2848
+"36","cycling T",2837
+"37","T-helper",2766
+"38","preMature IgG+ PC",2683
+"39","IgG+ PC precursor",2680
+"40","GC-Tfh-OX40",2452
+"41","Eff-Tregs-IL32",2348
+"42","NBC CD229+",2331
+"43","CM CD8 T",2009
+"44","T-Eff-Mem",1758
+"45","Tfh T:B border",1535
+"46","Mature IgA+ PC",1506
+"47","Proliferative NBC",1479
+"48","Mature IgG+ PC",1429
+"49","RM CD8 T",1265
+"50","MBC derived IgG+ PC",1256
+"51","PC committed Light Zone GCBC",1244
+"52","DN",1151
+"53","DC recruiters CD8 T",1103
+"54","PB",1001
+"55","Early MBC",931
+"56","TCRVδ+ gd T",876
+"57","DC2",868
+"58","MBC derived IgA+ PC",856
+"59","PDC",830
+"60","SELENOP Slan-like",784
+"61","SCM CD8 T",772
+"62","MAIT/CD161+TRDV2+ gd T-cells",695
+"63","CD8 Tf",618
+"64","FDC",590
+"65","C1Q Slan-like",510
+"66","NKp44+ ILC3",453
+"67","unannotated",442
+"68","MBC derived PC precursor",407
+"69","ZNF683+ CD8 T",407
+"70","CD16-CD56+ NK",399
+"71","ILC1",398
+"72","MMP Slan-like",382
+"73","preMature IgM+ PC",363
+"74","MBC derived early PC precursor",340
+"75","CD16-CD56dim NK",334
+"76","IgD PC precursor",313
+"77","COL27A1+ FDC",305
+"78","Monocytes",303
+"79","DC1 mature",292
+"80","DC5",290
+"81","DC1 precursor",263
+"82","aDC1",260
+"83","ITGAX Slan-like",252
+"84","cycling FDC",248
+"85","IgM+ PC precursor",247
+"86","IFN+ CD8 T",246
+"87","Short lived IgM+ PC",223
+"88","Mature IgM+ PC",222
+"89","Neutrophils",214
+"90","aDC3",187
+"91","Cycling",185
+"92","M1 Macrophages",155
+"93","PB committed early PC precursor",155
+"94","Early PC precursor",147
+"95","EM CD8 T",138
+"96","Surface epithelium",134
+"97","CD16+CD56- NK",128
+"98","DZ migratory PC precursor",113
+"99","Crypt",109
+"100","IgM+ early PC precursor",107
+"101","IL7R DC",106
+"102","DC4",101
+"103","MRC",95
+"104","Transitional PB",91
+"105","IFN1+ PDC",85
+"106","Mast",80
+"107","NKp44- ILC3",76
+"108","preB",75
+"109","Basal cells",61
+"110","DC3",57
+"111","aDC2",45
+"112","FDCSP epithelium",44
+"113","CD14+CD55+ FDC",41
+"114","VEGFA+",32
+"115","FRC",30
+"116","GC DZ Noproli",27
+"117","unknown",25
+"118","Outer surface",16
+"119","preT",16

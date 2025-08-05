@@ -1,0 +1,163 @@
+---
+title: "2025_07_10_RCTD_Xenium_subset"
+format: html
+---
+
+RCTD of the xenium objects is stopping at 131K cells, despite the samples have 500k+ cells. That is if they complete at all. Others hit memory errors.
+
+This notebook will subset the Xenium objects that have been SCTransformed by their UMAP clusters. Each cluster will then be run through RCTD separately. Afterwards, we can try to stitch the RCTD objects together, or take just the annotation data and bring it back to the original Xenium object.
+
+```{r}
+library(Seurat)
+library(spacexr)
+library(tidyverse)
+```
+
+# Xenium object prep
+
+## Read in Xenium
+
+Read in Xenium object
+
+```{r}
+mrv.xenium <- readRDS(file = "data/new.mrv5.sct.xenium.rds")
+```
+
+## Generating subclusters based on UMAP
+
+Table of the number of cells in each UMAP cluster
+
+```{r}
+table(Idents(mrv.xenium))
+```
+Create a vector of the UMAP cluster
+
+```{r}
+umap.clusters <- levels(Idents(mrv.xenium))
+```
+
+# RCTD queries
+
+```{r}
+# This was my first attempt at subsetting. I couldn't get it to loop properly
+
+# Need to add these tick marks to call the number as a named variable later.
+
+# umap.clusters <- paste0("`", umap.clusters, "`")
+# temp <- paste0("mrv.xenium$", umap.clusters)
+
+# Use SplitObject() to create a list containing a xenium object for each cluster.
+
+# mrv.xenium <- SplitObject(mrv.xenium, split.by = "ident")
+# This works, but i can't call the clusters later on. Trying subset() instead
+
+# Code to create a RCTD query object for a single cluster
+
+# query.counts <- GetAssayData(mrv.xenium$`17`, assay = "Xenium", layer = "counts")
+# coords <- GetTissueCoordinates(mrv.xenium$`17`,
+#                                which = "centroids")
+# rownames(coords) <- coords$cell
+# coords$cell <- NULL
+# query <- SpatialRNA(coords, query.counts, colSums(query.counts))
+
+# Create a function that creates the RCTD query object
+
+# pre.RCTD <- function(x) {
+# query.counts <- GetAssayData(x, assay = "Xenium", layer = "counts")
+# coords <- GetTissueCoordinates(x,
+#                                which = "centroids")
+# rownames(coords) <- coords$cell
+# coords$cell <- NULL
+# query <- SpatialRNA(coords, query.counts, colSums(query.counts))
+# saveRDS(query, file = paste0("2025_07_10_results/mrv5/mrv5.", x, ".pre.RCTD.rds"))
+# }
+
+# This doesn't work in a loop because it supplies only a character value for x, which is incompatible with GetAssayData()
+```
+
+For loop to generate a RCTD query object from each individual cluster and save it.
+
+```{r}
+# This works!
+for (i in umap.clusters) {
+  temp.mrv <- subset(mrv.xenium, idents = i)
+  query.counts <- GetAssayData(temp.mrv, assay = "Xenium", layer = "counts")
+  coords <- GetTissueCoordinates(temp.mrv,
+                                 which = "centroids")
+  rownames(coords) <- coords$cell
+  coords$cell <- NULL
+  query <- SpatialRNA(coords, query.counts, colSums(query.counts))
+  saveRDS(query, file = paste0("2025_07_10_results/mrv5/preRCTD/mrv5.", i, ".pre.RCTD.rds"))
+}
+```
+
+For the code below we no longer need the xenium object so clear out variables here.
+
+```{r}
+rm(mrv.xenium)
+```
+
+# Run RCTD one subset at a time
+
+Now we load the reference object
+
+```{r}
+hcat.reference <- readRDS(file = "data/hcat.reference.object.rds")
+```
+
+Creating a vector of file names
+
+This chunk performs RCTD annotation for a single cluster.
+
+```{r}
+# query <- readRDS(file = "2025_07_10_results/mrv1/preRCTD/mrv1.45.pre.RCTD.rds")
+# mrv.RCTD <- create.RCTD(query, hcat.reference, max_cores = 16, UMI_min_sigma = 10)
+# mrv.RCTD <- run.RCTD(mrv.RCTD, doublet_mode = "doublet")
+# saveRDS(mrv.RCTD, file = paste0("2025_07_10_results/mrv1/postRCTD/mrv1.45.post.RCTD.rds"))
+```
+
+Creating a file name vector to loop through
+
+```{r}
+# save for later
+pre.files <- c(
+"mrv6.0.",
+
+)
+```
+
+Run the loop version on all clusters
+
+```{r}
+for (i in pre.files) {
+  query <- readRDS(file = paste0("2025_07_10_results/mrv5/preRCTD/", i, "pre.RCTD.rds"))
+  mrv.RCTD <- create.RCTD(query, hcat.reference, max_cores = 16, UMI_min_sigma = 10)
+  mrv.RCTD <- run.RCTD(mrv.RCTD, doublet_mode = "doublet") 
+  saveRDS(mrv.RCTD, file = paste0("2025_07_10_results/mrv5/postRCTD/", i, "post.RCTD.rds"))
+}
+```
+
+
+### Error codes
+"Error in choose_sigma_c(RCTD) : 
+  choose_sigma_c determined a N_fit of 0! This is probably due to unusually low UMI counts per bead in your dataset. Try decreasing the parameter UMI_min_sigma. It currently is 300 but none of the beads had counts larger than that."
+  
+I changed the UMI_min_sigma = 10 in the created.RCTD() after this.
+
+"Error in get_de_genes(cell_type_info$info, puck.original, fc_thresh = config$fc_cutoff_reg,  : 
+  get_de_genes: At least 90% of genes do not match between the SpatialRNA and Reference objects. Please examine this. If this is intended, please remove the missing genes from the Reference object."
+  
+I got this on cluster 38 and 44 of mrv1. Skipped them.
+
+Skipped clusters
+  mrv1: 38, 44
+
+
+
+
+
+
+
+
+
+
